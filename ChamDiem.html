@@ -1,0 +1,1414 @@
+﻿<!DOCTYPE html>
+
+<html>
+<head>
+  <title id="page_title">Chấm điểm</title>
+  <meta http-equiv="Content-Type" content="text/html; CHARSET=UTF-8" />
+  <link id="page_style" rel="stylesheet" type="text/css" href="ChamDiem.css">
+  <script>
+/*
+Version: 0.71
+*/
+
+// Nut hien tai:
+// > bat dau, tiep tuc
+// < tam dung san soc, neu het 60 giay thi ket thuc tran dau
+// ; tam dung xem xet
+// 5: Tăng lỗi Đỏ
+// t: Tăng điểm Đỏ
+// b: Dừng săn sóc
+// 0: Giảm lỗi Đỏ
+// p: Giảm điểm Đỏ
+// [: Tăng điểm Xanh
+// ]: Giảm điểm Xanh
+// Thay doi cac phim bam o day
+var aDefKeys = new Array(57, 190, 73, 49, 90, 87, 56, 188, 76, 50, 88, 65, 55, 77, 67, 51, 68, 70, 54, 78, 85, 52, 86, 69, 80, 107, 82, 48, 79, 219, 84, 72, 71, 66, 59);
+// Array(57, 190, 73, 49, 87, 83, 56, 188, 76, 50, 88, 65, 55, 77, 70, 51, 67, 72, 54, 78, 85, 52, 86, 69, 109, 107, 53, 48, 219, 221, 84, 80, 71, 66, 59);
+// 90, 88, 67, 86, 66, 78, 57, 48, 173, 61, 79, 80, 75, 76, 219, 221, 220);
+//Array(55, 50, 52, 49, 51, 56, 83, 65, 70, 75, 68, 74, 77, 188, 90, 67, 86, 88, 73, 81, 69, 85, 82, 87, 109, 107, 57, 48, 219, 221, 79, 80, 190, 76, 59);
+// Thông tin trận đấu để thử
+// 1;Nam;56kg;Nguyễn Văn A;Lê Hoàng B
+
+// Điểm cho từng loại đòn đánh
+// Đấm = iDiem[0], Đá Bụng = iDiem[1], Đá Mặt = iDiem[2]
+const iNhomDam = 1;
+const iNhomDaBung = 2;
+const iNhomDaMat = 0;
+const iDiem = [3, 1, 2];
+// Số lần phạm lỗi tối đa trước khi dừng trận đấu
+const iMaxLoi = 100;
+const iSoTheoDoi = 4;   // Theo dõi 4 thông số của mỗi vận động viên
+const iTDDiem = 0;
+const iTDDam = 1;
+const iTDHiepThang = 2;
+const iTDLoi = 3;
+
+// Lớp đối tượng 
+function xoaTheoDoi(oDoiTuong) {
+    for(var i=0; i<iSoTheoDoi; i++) {
+        oDoiTuong.TheoDoi[i] = 0;
+    }
+}
+function HiepDauVdv(){
+    this.TheoDoi = [];
+    xoaTheoDoi(this);
+    this.dieuChinh = function(iDieuChinh) {
+        // iTruoc = this.TheoDoi[iTDDiem];
+        this.TheoDoi[iTDDiem] += iDieuChinh;
+        // iSau = this.TheoDoi[iTDDiem];
+        // if(iDieuChinh==-2)
+        //     alert("Dieu chinh {0} thanh {1}.".format(iTruoc, iSau));
+    }
+    this.tangDiem = function(iNhom) {
+        if(iNhom == iNhomDam) {
+            this.TheoDoi[iTDDam] += 1;
+        } else {
+            // Không làm gì
+        }
+    }
+    this.thangHiep = function(bThang=true) {
+        this.TheoDoi[iTDHiepThang] = bThang?1:0;
+    }
+    this.tangLoi = function(bCancel) {
+        // Khi theo dõi, lỗi có thể được giảm dưới 0 cho trường hợp
+        // bỏ lỗi của hiệp trước.
+        this.TheoDoi[iTDLoi] += bCancel?-1:1;
+    }
+}
+function VanDongVien(sMauGiap, sHoTen) {
+    this.MauGiap = sMauGiap;
+    // Từ cột: Bắt đầu hiện các điểm theo dõi từ cột thứ mấy trong bảng
+    this.TuCot = sMauGiap=='D'?0:iSoTheoDoi;
+    this.HoTen = sHoTen;
+    this.CacHiep = [new HiepDauVdv(), new HiepDauVdv(),
+            new HiepDauVdv(), new HiepDauVdv()];
+    this.TheoDoi = [];
+    xoaTheoDoi(this);
+    this.datTranDau = function(oTranDau) {
+        this.TranDau = oTranDau;
+    }
+    this.dieuChinh = function(iDieuChinh, oHiep=null) {
+        var bCoThayDoi = true;
+        if(iDieuChinh>0 || this.TheoDoi[iTDDiem]+iDieuChinh>=0) {
+            this.TheoDoi[iTDDiem] += iDieuChinh;
+            modify(this.MauGiap, iDieuChinh);
+            if(oHiep == null) {
+                oHiep = this.layHiep();
+            } else {
+                // Không cần làm gì
+            }
+            oHiep.dieuChinh(iDieuChinh);
+        } else {
+            bCoThayDoi = false;
+            // Không cần làm gì
+        }
+        return bCoThayDoi;
+    }
+    this.ghiThongTin = function () {
+        const sMauThongTin = "{0}: Đấm={1}, Hiệp thắng={2}, Trừ={3}";
+        this.tinhThongTin();
+        logFightInfo(sMauThongTin.format(
+                this.HoTen, this.TheoDoi[iTDDam],
+                this.TheoDoi[iTDHiepThang], this.TheoDoi[iTDLoi]));
+    }
+    this.layDiem = function() {
+        oHiep = this.layHiep();
+        return oHiep.TheoDoi[iTDDiem];
+    }
+    this.layHiep = function() {
+        return this.CacHiep[this.TranDau.Hiep-1];
+    }
+    this.tangDiem = function(iNhom) {
+        oHiep = this.layHiep();
+        oHiep.tangDiem(iNhom);
+        this.dieuChinh(iDiem[iNhom], oHiep);
+    }
+    this.thangHiep = function(bThang=true) {
+        oHiep = this.layHiep();
+        oHiep.thangHiep(bThang);
+    }
+    this.tinhThongTin = function() {
+        oBangTT = document.getElementById('BangTTTranDau');
+        // alert(oBangTT.innerHTML);
+        xoaTheoDoi(this);
+        for (var i=0; i<4; i++) {
+            oHiep = this.CacHiep[i];
+            row = oBangTT.rows[i+1];
+            // alert(row.cells[0].innerHTML);
+            for(var j=0; j<iSoTheoDoi; j++) {
+                this.TheoDoi[j] += oHiep.TheoDoi[j];
+                row.cells[1+this.TuCot+j].innerHTML = oHiep.TheoDoi[j];
+            }
+            // alert(row.innerHTML);
+        }
+        row = oBangTT.rows[5];
+        // alert(row.cells[0].innerHTML);
+        for(var j=0; j<iSoTheoDoi; j++) {
+            row.cells[1+this.TuCot+j].innerHTML = this.TheoDoi[j];
+        }
+    }
+    this.tangLoi = function(bCancel) {
+        var bCoThayDoi = true;
+        if(!bCancel || this.TheoDoi[iTDLoi]>0) {
+            this.TheoDoi[iTDLoi] += bCancel?-1:1;
+            oHiep = this.layHiep();
+            oHiep.tangLoi(bCancel);
+        } else {
+            bCoThayDoi = false;
+        }
+        return bCoThayDoi;
+    }
+}
+
+function TranDau(oVdvDo, oVdvXanh) {
+    this.D = oVdvDo;
+    this.D.TranDau = this;
+    this.X = oVdvXanh;
+    this.X.TranDau = this;
+    this.DoiThu = {X: "D", D: "X"};
+    this.Hiep = 1;
+    oBangTT = document.getElementById('BangTTTranDau');
+    try {
+        // alert(oBangTT.rows.length);
+        for(var i=oBangTT.rows.length-1; i>0; i--) {
+            oBangTT.deleteRow(i);
+        }
+        for(var i=1; i<=5; i++) {
+            var row = oBangTT.insertRow(-1);
+            for(var j=0; j<iSoTheoDoi*2 + 1; j++) {
+                var cell = row.insertCell(j);
+                cell.innerHTML = j==0?(i<5?i:"Tổng"):0;
+            }
+        }
+    } catch(error) {
+        // Không làm gì
+    }
+    this.ghiThongTin = function() {
+        this.tinhThangHiep();
+        this.D.ghiThongTin();
+        this.X.ghiThongTin();
+    }
+    this.tangLoi = function(sMau, bCancel) {
+        if(this[sMau].tangLoi(bCancel)) {
+            decrease(sMau, bCancel);
+            this[this.DoiThu[sMau]].dieuChinh(bCancel?-1:1);
+        } else {
+            // Không cần làm gì
+        }
+    }
+    this.tinhTatCaHiep = function() {
+        var iNhoHiep = this.Hiep;
+        for(var i=1; i<=4; i++) {
+            this.Hiep = i;
+            this.tinhThangHiep();
+        }
+        this.Hiep = iNhoHiep;
+        this.ghiThongTin();
+    }
+    this.tinhThangHiep = function() {
+        iDiemDo =this.D.layDiem();
+        iDiemXanh =this.X.layDiem();
+        this.D.thangHiep(iDiemDo>iDiemXanh);
+        this.X.thangHiep(iDiemDo<iDiemXanh);
+    }
+}
+
+var oTranDau = new TranDau(
+        new VanDongVien('D', 'Do'),
+        new VanDongVien('X', 'Xanh')
+        );
+
+// function TrongTai(sPhimXanh1, sPhimXanh2, sPhimXanh3,
+//         sPhimDo1, sPhimDo2, sPhimDo3) {
+//     this.PhimXanh = [sPhimXanh1, sPhimXanh2, sPhimXanh3];
+//     this.PhimDo = [sPhimDo1, sPhimDo2, sPhimDo3];
+//     this.datVdv = function (oVanDongVien, sLoaiVdv) {
+//         if (sLoaiVdv == 'X') {
+//             this.VdvXanh = oVanDongVien
+//         } else {
+//             this.VdvDo = oVanDongVien
+//         }
+//     }
+// }
+
+// Các biến toàn cục
+var oCurrCtrl = null;   // Lưu ô nhập đang được chọn (focus)
+var sMatchX1 = '';
+var sMatchX2 = '';
+var sMatchX3 = '';
+var sMatchD1 = '';
+var sMatchD2 = '';
+var sMatchD3 = '';
+var sMatchX21 = '';
+var sMatchX22 = '';
+var sMatchX23 = '';
+var sMatchD21 = '';
+var sMatchD22 = '';
+var sMatchD23 = '';
+// Thoi gian moi hiep tinh theo giay, vd 2 phut la 120 giay
+var iTimeFight = 120;
+var iTimeLeft = iTimeFight;
+var bTickOn = true;
+var bIsFighting = false;
+var bInBreak = false;
+var bPause = false;
+var bPauseType = '';
+var iPauseTime = 0;
+var bPauseTick = true;
+var iBtlCount = 1;
+var iDau = 0;
+var iCuoi = 0;
+var iToiDa = 40;
+var aMt = new Array();    // t1
+var aMStatus = new Array();    // 0: Khong co gi, 1: Dang khop phim, 2: Ket thuc khop phim
+var aMGroup = new Array();    // 0: Mat, 1: Bung, 2: Kho
+var aMVDV = new Array();    // D: Do, X: Xanh
+var aMKey = new Array();    // Luu iNum
+var aMCount = new Array();    // So lan khop
+var aDHien = Array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);    // So lan bam phim ben Do cua trong tai
+var aXHien = Array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);    // So lan bam phim ben Xanh cua trong tai
+var aNhom = Array('mat', 'bung', 'kho');
+var t2;
+var oDisplay = null;
+var oDisplay2 = null;
+var aCtrl = Array('PhimD12', 'PhimXTru', 'PhimXCong', 'PhimDTru', 'PhimDCong', //0, 1, 2, 3, 4
+                    'PhimXTruDiem', 'PhimXCongDiem', 'PhimDTruDiem', 'PhimDCongDiem',    //5, 6, 7, 8
+                    'PhimBatDau', 'PhimDungSS', 'PhimDungXX');    //9, 10, 11
+
+// Remaining:
+//    - Count down for SanSoc pause - Done
+//    - Start button can be use to continue fighting after pause - Done
+//    - Add 6 keys for increase / decrease score for each fighter, decrease half point - Done
+//    - Allow press twice in a second
+
+//http://stackoverflow.com/questions/610406/javascript-equivalent-to-printf-string-format/4673436#4673436
+// First, checks if it isn't implemented yet.
+if (!String.prototype.format) {
+  String.prototype.format = function() {
+    var args = arguments;
+    return this.replace(/{(\d+)}/g, function(match, number) {
+      return typeof args[number] != 'undefined'
+        ? args[number]
+        : match
+      ;
+    });
+  };
+}
+function logFightInfo(sText, bReset = false) {
+    if(bReset) {
+        ChamDiem.FightInfo.value = 'Trận\tHiệp\tGiây còn lại\tĐang đánh\tĐang nghỉ\tĐang dừng\tGiây ngưng\tSự kiện\tĐiểm Xanh\tLỗi Xanh\tĐiểm Đỏ\tLỗi Đỏ\n';
+    }
+    ChamDiem.FightInfo.value += '{0}\t{1}\t{2}\t{3}\t{4}\t{5}\t{6}\t{7}\t{8}\t{9}\t{10}\t{11}\n'.format(ChamDiem.TranSo.value, oTranDau.Hiep,iTimeLeft+(bTickOn?'.0':'.5'), bIsFighting, bInBreak, bPause, (!bPause?0:iPauseTime+(bTickOn?'.0':'.5')), sText, ChamDiem.DiemX.value, ChamDiem.TruX.value, ChamDiem.DiemD.value, ChamDiem.TruD.value)
+}
+function showDebug(sText, bCont) {
+    if(oDisplay.document.getElementById('Debug')) {
+        if(!bCont) oDisplay.document.getElementById('Debug').value = '';
+        oDisplay.document.getElementById('Debug').value += sText;
+    }
+}
+function onFocus(oCtrl) {
+    //ChamDiem.Debug.value = 'onFocus: '+oCtrl.name.substr(0, 4);
+    if(oCtrl.name.indexOf('Phim')>=0) oCurrCtrl = oCtrl;
+    else oCurrCtrl = null;
+    if(oCtrl.name.indexOf('TrongTai')>=0||oCtrl.name.indexOf('Diem')>=0
+        ||oCtrl.name.indexOf('Tru')>=0) oCtrl.blur();
+    //showDebug('onFocus: '+(oCurrCtrl?oCurrCtrl.name:'None'));
+}
+function onKey(event, sType) {
+    //showDebug('onKey: '+(oCurrCtrl?oCurrCtrl.name:'None') + ' sType: '+sType);//event.keyCode;
+    if(sType=='up') {
+        if(oCurrCtrl) {
+            setKey(oCurrCtrl, event.keyCode);
+        } else {
+            if(ChamDiem.elements[aCtrl[1]].value==event.keyCode)
+                oTranDau.tangLoi('X', false);
+            if(ChamDiem.elements[aCtrl[2]].value==event.keyCode)
+                oTranDau.tangLoi('X', true);
+            if(ChamDiem.elements[aCtrl[3]].value==event.keyCode)
+                oTranDau.tangLoi('D', false);
+            if(ChamDiem.elements[aCtrl[4]].value==event.keyCode)
+                oTranDau.tangLoi('D', true);
+            if(ChamDiem.elements[aCtrl[5]].value==event.keyCode)
+                oTranDau['X'].dieuChinh(1);
+            if(ChamDiem.elements[aCtrl[6]].value==event.keyCode)
+                oTranDau['X'].dieuChinh(-1);
+            if(ChamDiem.elements[aCtrl[7]].value==event.keyCode)
+                oTranDau['D'].dieuChinh(1);
+            if(ChamDiem.elements[aCtrl[8]].value==event.keyCode)
+                oTranDau['D'].dieuChinh(-1);
+            if(bIsFighting) {
+                if(!bInBreak && !bPause) {
+                    for(var i=1; i<=12; i++) {    // 12 = 3 * 4
+                        if(ChamDiem.elements['PhimX'+i].value==event.keyCode) setMatch(i, 'X');
+                        if(ChamDiem.elements['PhimD'+i].value==event.keyCode) setMatch(i, 'D');
+                    }
+                } else {
+                    // Do nothing
+                }
+            } else { // ~ if(!bIsFighting)
+                if(ChamDiem.elements[aCtrl[9]].value==event.keyCode) {
+                    startFight();
+                } else {
+                    // Do nothing
+                }
+            }
+        }
+    } else { // ~ if(sType=='down')
+        if(bIsFighting && !bInBreak) {
+            if((bPause && ChamDiem.elements[aCtrl[9]].value==event.keyCode)) {
+                // Continue fighting
+                setPause('tt')
+            } else if(!bPause && ChamDiem.elements[aCtrl[10]].value==event.keyCode) {
+                // Pause with 1 minute limit (San Soc)
+                setPause('ss');
+            } else if(!bPause && ChamDiem.elements[aCtrl[11]].value==event.keyCode) {
+                // Pause with no limit (Xem Xet)
+                setPause('xx');
+            } else {
+                // Do nothing
+            }
+        } else {
+            // Do nothing
+        }
+    }
+}
+function setPause(sType) {
+    if(bPause) {
+        logFightInfo('Tiếp tục đánh');
+    }
+    if(sType != '')
+        bPause = !bPause;
+    if(!bPause) {
+        showInfo('HangCan');
+        showInfo('GioiTinh');
+        document.getElementById('DungSS').disabled = false;
+        document.getElementById('DungXX').disabled = false;
+    } else {
+        bPauseType = sType;
+        if(sType=='ss') {
+            // Dung san soc 60 giay
+            iPauseTime = 60;
+            document.getElementById('DungXX').disabled = true;
+            document.getElementById('GioiTinh').innerHTML = "SĂN SÓC";
+            duplicateDisplay('GioiTinh');
+            logFightInfo('Dừng săn sóc');
+        } else if(sType=='xx') {
+            // Dung xem xet
+            iPauseTime = 0;
+            document.getElementById('DungSS').disabled = true;
+            document.getElementById('GioiTinh').innerHTML = "XEM XÉT";
+            duplicateDisplay('GioiTinh');
+            logFightInfo('Dừng xem xét');
+        }
+    }
+}
+function resetPause() {
+    bPause = false;
+    bPauseType = '';
+    iPauseTime = 0;
+    bPauseTick = true;
+    setPause('')
+}
+function setKey(oCtrl, iKey) {
+    //ChamDiem.Debug.value = 'setKey: '+ChamDiem.elements;
+    for(var i=1; i<=12; i++) {
+        if(('PhimX'+i)!=oCtrl.name&&ChamDiem.elements['PhimX'+i].value==iKey)
+            // Clear conflict key
+            ChamDiem.elements['PhimX'+i].value = '';
+        if(('PhimD'+i)!=oCtrl.name&&ChamDiem.elements['PhimD'+i].value==iKey)
+            // Clear conflict key
+            ChamDiem.elements['PhimD'+i].value = '';
+    }
+    // Clear conflict for control keys
+    for(i=1; i<=11; i++)
+        if(oCtrl.name!=aCtrl[i]&&ChamDiem.elements[aCtrl[i]].value==iKey)
+            ChamDiem.elements[aCtrl[i]].value = '';
+
+    oCtrl.value = iKey;
+    // Show string to assist saving default.
+    ChamDiem.aDefKeys.value = 'Array(';
+    for(i=1; i<=4; i++) {
+        ChamDiem.aDefKeys.value += ChamDiem.elements['PhimX'+i].value+', ';
+        ChamDiem.aDefKeys.value += ChamDiem.elements['PhimX'+(i+4)].value+', ';
+        ChamDiem.aDefKeys.value += ChamDiem.elements['PhimX'+(i+8)].value+', ';
+        ChamDiem.aDefKeys.value += ChamDiem.elements['PhimD'+i].value+', ';
+        ChamDiem.aDefKeys.value += ChamDiem.elements['PhimD'+(i+4)].value+', ';
+        ChamDiem.aDefKeys.value += ChamDiem.elements['PhimD'+(i+8)].value+', ';
+    }
+
+    // Add control keys
+    for(i=1; i<=11; i++)
+        ChamDiem.aDefKeys.value += ChamDiem.elements[aCtrl[i]].value+(i!=11?', ':');');
+
+    // Move focus to next control key
+    for(i=0; i<=11&&oCtrl.name!=aCtrl[i]; i++);
+    //alert(i);
+    if(i<11) {
+        ChamDiem.elements[aCtrl[i+1]].focus();
+    } else if(i==11) {
+        //ChamDiem.DiemX.focus();
+        oCtrl.blur();
+        showHide('VungXacLapPhim');
+    } else {
+        var sChar = oCtrl.name.substr(4, 1);
+        var iNum = Number(oCtrl.name.substr(5, 2));
+        //ChamDiem.Debug.value = 'setKey: '+sChar+iNum+(sChar=='X'?iNum-8:iNum-8+1);
+        ChamDiem.elements['Phim'+(iNum<=8?sChar:(sChar=='X'?'D':'X'))+(iNum<=8?iNum+4:(sChar=='X'?iNum-8:iNum-8+1))].focus();
+    }
+}
+function setMatch(iNum, sVDV) {
+// iNum: 1 den 12, so thu tu phim cham diem
+// sVDV: X hay D
+    var iThayDoi = 0;
+    var iNhom = Math.floor((iNum-1) / 4);
+    var iLan = 1;
+    var iThay = -1;
+//var aMt = new Array();    // t1
+//var aMStatus = new Array();    // 0: Khong co gi, 1: Dang khop phim, 2: Ket thuc khop phim
+//var aMGroup = new Array();    // 0: Mat, 1: Bung, 2: Kho
+//var aMVDV = new Array();    // D: Do, X: Xanh
+//var aMKey = new Array();    // Luu iNum
+//var aMCount = new Array();    // So lan khop
+//var aDHien = Array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);    // So lan bam phim ben Do cua trong tai
+//var aXHien = Array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);    // So lan bam phim ben Xanh cua trong tai
+
+    var i;
+    var sTemp;
+    // Tim xem nhom da co chua
+    for(i=iDau; iThay<0 && i!=(iCuoi+1)%iToiDa; i=(i+1)%iToiDa) {    // Bug: iCuoi < iDau thi bi treo
+        // Neu phim do da co thi qua nhom tiep theo
+        if(sVDV==aMVDV[i] && aMKey[i].indexOf((iNum<10?'0':'')+iNum)>-1) {
+        } else if((sVDV==aMVDV[i] && aMGroup[i]==iNhom)        // Phim chua co va trung nhom, tim thay nhom khop
+             ) iThay = i;
+    }
+    if(aMStatus[iThay]==1) {
+        //showDebug(' Thay ' + sVDV + ' nhom ' + iNhom + ' phim so ' + iNum + ' tai ' + iThay, true);
+        // Tim thay nhom ma khong trung phim
+        aMCount[iThay]++;    // Tang so dem
+        aMKey[iThay] += (iNum<10?'0':'') + iNum + ',';    // Ghi nhan lai phim, dau phay de tranh truong hop tim thay 10 trong 0103
+        // Neu so dem = 3 thi tang diem
+        logFightInfo('Tay bấm: {0}{1};Nhóm: {2};Đếm: {3}{4}'.format(sVDV, iNum, iNhom, aMCount[iThay], (document.getElementById('HaiTrongBa').checked?';2 trong 3':'')));
+        if((aMCount[iThay]==3&&!document.getElementById('HaiTrongBa').checked)
+            ||(aMCount[iThay]==2&&document.getElementById('HaiTrongBa').checked)) {
+            // modify(sVDV, (iNhom==0?iDaMat:(iNhom==1?iDam:iDaBung)));
+            oTranDau[sVDV].tangDiem(iNhom);
+        } else {
+            // Do nothing
+        }
+    } else {
+        // Nhom moi hay lan moi
+        iCuoi = (iCuoi+1) % iToiDa;
+        aMt[iCuoi] = setTimeout('clearMatch('+iCuoi+');', ChamDiem.TGKhopPhim.value);
+        aMGroup[iCuoi] = iNhom;
+        aMVDV[iCuoi] = sVDV;
+        aMKey[iCuoi] = (iNum<10?'0':'') + iNum + ',';
+        aMCount[iCuoi] = 1;
+        aMStatus[iCuoi] = 1;
+        logFightInfo('Tay bấm: {0}{1};Nhóm: {2};Đếm: {3}'.format(sVDV, iNum, iNhom, aMCount[iCuoi]));
+        //showDebug(' Moi ' + aMVDV[iCuoi] + ' nhom ' + aMGroup[iCuoi] + ' phim so ' + aMKey[iCuoi] + ' tai ' + iCuoi, true);
+    }
+
+    // Hien cac o cho biet loai phim bam
+    if(sVDV=='X') {
+        aXHien[iNum-1]++;
+        //showDebug(' aXHien ' + aXHien, true);
+        sTemp = 'X' + aNhom[iNhom].charAt(0) + ((iNum-1)%4 + 1);
+        oDisplay.document.getElementById(sTemp).src='img/'+aNhom[iNhom]+'Dot.gif';
+        if(oDisplay2) oDisplay2.document.getElementById(sTemp).src='img/'+aNhom[iNhom]+'Dot.gif';
+    } else if(sVDV=='D') {
+        aDHien[iNum-1]++;
+        //showDebug(' aDHien ' + aDHien, true);
+        sTemp = 'D' + aNhom[iNhom].charAt(0) + ((iNum-1)%4 + 1);
+        oDisplay.document.getElementById(sTemp).src='img/'+aNhom[iNhom]+'Dot.gif';
+        if(oDisplay2) oDisplay2.document.getElementById(sTemp).src='img/'+aNhom[iNhom]+'Dot.gif';
+    }
+    //showDebug('iDau ' + iDau + ' iCuoi ' + iCuoi, false);
+    showScore();
+}
+function clearMatch(iNhom) {
+    var sTemp;
+    aMStatus[iNhom] = 2;
+    //showDebug(' Xoa ' + aMVDV[iNhom] + ' phim so ' + aMKey[iNhom] + ' tai ' + iNhom, true);
+    for(var i=1; i<=12; i++) {
+        // Giam lan hien dau hieu phim bam
+        if(aMKey[iNhom].indexOf((i<10?'0':'')+i)>-1) {
+            // Neu co phim thi giam so lan bam
+            var sImg = '';
+            if(aMVDV[iNhom]=='X') {
+                aXHien[i-1]--;
+                if(aXHien[i-1]==0) sImg = 'X';    // Dau hieu da het lan bam
+                //showDebug(' aXHien ' + aXHien, true);
+            } else if(aMVDV[iNhom]=='D') {
+                aDHien[i-1]--;
+                if(aDHien[i-1]==0) sImg = 'D';    // Dau hieu da het lan bam
+                //showDebug(' aDHien ' + aDHien, true);
+            }
+            // Xoa cac dau hieu
+            if(sImg!='') {
+                sTemp = aMVDV[iNhom] + aNhom[aMGroup[iNhom]].charAt(0) + ((i-1)%4 + 1);
+                oDisplay.document.getElementById(sTemp).src='img/'+sImg+'Dot.gif';
+                if(oDisplay2) oDisplay2.document.getElementById(sTemp).src='img/'+sImg+'Dot.gif';
+            }
+        }
+    }
+    aMGroup[iNhom] = -1;
+    aMVDV[iNhom] = '';
+    aMKey[iNhom] = '';
+    aMCount[iNhom] = 0;
+    aMStatus[iNhom] = 0;
+    iDau = (iDau + 1) % iToiDa;
+    //showDebug('iDau ' + iDau + ' iCuoi ' + iCuoi, false);
+}
+function decrease(sVDV, bCancel) {
+    if((ChamDiem.TruX.value<iMaxLoi&&ChamDiem.TruD.value<iMaxLoi)||bCancel) {
+        if(sVDV=='X') {
+            if(!bCancel) {
+                ChamDiem.TruX.value++;
+                //if(ChamDiem.TruX.value % 2==0) ChamDiem.DiemD.value++;
+            } else if(ChamDiem.TruX.value>0) {
+                ChamDiem.TruX.value--;
+                //if(ChamDiem.TruX.value % 2==1&&ChamDiem.DiemD.value>0) ChamDiem.DiemD.value--;
+            }
+        } else {
+            if(!bCancel) {
+                ChamDiem.TruD.value++;
+                //if(ChamDiem.TruD.value % 2==0) ChamDiem.DiemX.value++;
+            } else if(ChamDiem.TruD.value>0) {
+                ChamDiem.TruD.value--;
+                //if(ChamDiem.TruD.value % 2==1&&ChamDiem.DiemX.value>0) ChamDiem.DiemX.value--;
+            }
+        }
+    }
+    showScore();
+    logFightInfo('{0} lỗi: {1}'.format(bCancel?'Giảm':'Tăng', sVDV));
+    if(ChamDiem.TruX.value>=iMaxLoi||ChamDiem.TruD.value>=iMaxLoi) doneFight();
+}
+function modify(sVDV, iDiem) {
+    //alert(ChamDiem.DiemX.value+iDiem);
+    if(sVDV=='X') {
+        if(iDiem>0||Number(ChamDiem.DiemX.value)+iDiem>=0) ChamDiem.DiemX.value = Number(ChamDiem.DiemX.value) + iDiem;
+    } else {
+        if(iDiem>0||Number(ChamDiem.DiemD.value)+iDiem>=0) ChamDiem.DiemD.value = Number(ChamDiem.DiemD.value) + iDiem;
+    }
+    logFightInfo('{0} {1} điểm: {2}'.format(iDiem<0?'Giảm ':'Tăng ', Math.abs(iDiem), sVDV));
+    showScore();
+}
+function startFight() {
+    //if(ChamDiem.TruX.value<iMaxLoi-2&&ChamDiem.TruD.value<iMaxLoi-2) {
+        iTimeLeft = ChamDiem.TGHiepDau.value;
+        bTickOn = true;
+        bIsFighting = true;
+        bInBreak = false;
+        resetPause();
+        //alert('Start!');
+        showTimeLeft();
+        oTranDau.Hiep = 1;
+        showRound(oTranDau.Hiep);
+        t2 = setTimeout('inFight();', 500);
+        document.getElementById('HaiManHinh').disabled = true;
+        document.getElementById('HaiTrongBa').disabled = true;
+        ChamDiem.BatDau.blur();
+        ChamDiem.BatDau.disabled = true;
+        document.getElementById('DungSS').disabled = false;
+        document.getElementById('DungXX').disabled = false;
+        ChamDiem.XoaDiem.disabled = true;
+        ChamDiem.TranMoi.disabled = true;
+        ChamDiem.TGHiepDau.disabled = true;
+        ChamDiem.TGNghiGiuaHiep.disabled = true;
+        showScore();
+        logFightInfo('Bắt đầu đánh', true);
+    //}
+}
+function restartFight() {
+    iTimeLeft = 60*Number(ChamDiem.DatLaiPhut.value) + Number(ChamDiem.DatLaiGiay.value);
+    //alert(iTimeLeft);
+    bIsFighting = true;
+    bTickOn = true;
+    bInBreak = false;
+    resetPause();
+    showTimeLeft();
+    oTranDau.Hiep = Number(ChamDiem.DatLaiHiep.value);
+    showInfo('HangCan');
+    showInfo('GioiTinh');
+    showRound(oTranDau.Hiep);
+    // Bo bo dem gio cu truoc khi dat bo dem gio moi
+    clearTimeout(t2);
+    t2 = setTimeout('inFight();', 500);
+    document.getElementById('HaiManHinh').disabled = true;
+    document.getElementById('HaiTrongBa').disabled = true;
+    ChamDiem.BatDau.disabled = true;
+    document.getElementById('DungSS').disabled = false;
+    document.getElementById('DungXX').disabled = false;
+    ChamDiem.XoaDiem.disabled = true;
+    ChamDiem.TranMoi.disabled = true;
+    ChamDiem.TGHiepDau.disabled = true;
+    ChamDiem.TGNghiGiuaHiep.disabled = true;
+    showScore();
+    logFightInfo('Bắt đầu đánh lại');
+}
+function inFight() {
+    if(!bPause) {
+        bTickOn = !bTickOn;
+        if(bTickOn) iTimeLeft--;
+        showTimeLeft();
+    } else {
+        bPauseTick = !bPauseTick;
+        if(bPauseTick) {
+            if(bPauseType=="xx") iPauseTime++; // Count up for XemXet pause
+            else iPauseTime--;    // Count down for SanSoc pause
+        }
+        showPauseTime();
+        if(bPauseType=="ss" && iPauseTime==0) {
+            // Time limit is reached, stop fighting
+            doneFight();
+        }
+    }
+    if(iTimeLeft==0||oTranDau.Hiep==4) {
+        if(iTimeLeft==0) {
+            oTranDau.ghiThongTin();
+        } else {
+            // Không cần làm gì
+        }
+        // Nghi giua hiep hay het tran dau
+        if((oTranDau.Hiep==3&&(Number(ChamDiem.DiemD.value)!=Number(ChamDiem.DiemX.value)))
+            ||(oTranDau.Hiep==4&&(iTimeLeft==0||Math.abs(Number(ChamDiem.DiemD.value)-Number(ChamDiem.DiemX.value))>=ChamDiem.DiemDungHiep4.value))) {
+            // Het tran dau neu diem khong bang nhau o cuoi hiep 3, hay khi het hiep 4
+                //alert(Number(ChamDiem.DiemD.value)!=Number(ChamDiem.DiemX.value));
+                //alert(Math.abs(Number(ChamDiem.DiemD.value)-Number(ChamDiem.DiemX.value)) + '\n' + ChamDiem.DiemDungHiep4.value)
+                doneFight();
+            //iTimeLeft = ChamDiem.TGHiepDau.value;
+        } else if(iTimeLeft==0) {
+            // Het hiep hay het gio nghi
+            if(!bInBreak) {
+                // Het hiep
+                iTimeLeft = ChamDiem.TGNghiGiuaHiep.value;
+                bTickOn = true;
+                bInBreak = true;
+                document.getElementById('DungSS').disabled = true;
+                document.getElementById('DungXX').disabled = true;
+                document.getElementById('GioiTinh').innerHTML = "GIỮA HIỆP";
+                duplicateDisplay('GioiTinh');
+                logFightInfo('Nghỉ giữa hiệp');
+            } else {
+                // Het gio nghi
+                oTranDau.Hiep++;
+                showRound(oTranDau.Hiep);
+                if(oTranDau.Hiep==4) {
+                    clearScore(true);
+                } else {
+                    // Không làm gì
+                }
+                iTimeLeft = ChamDiem.TGHiepDau.value;
+                bTickOn = true;
+                bInBreak = false;
+                document.getElementById('DungSS').disabled = false;
+                document.getElementById('DungXX').disabled = false;
+                showInfo('GioiTinh');
+                logFightInfo('Bắt đầu hiệp');
+            }
+        }
+    }
+    if(iTimeLeft>0&&bIsFighting) t2 = setTimeout('inFight();', 500);
+    if(iTimeLeft>2&&iTimeLeft<=11&&iTimeLeft % 2==1&&!bTickOn) {
+        //alert(document.getElementById('wavCountDown'));
+        document.getElementById('wavCountDown').play();
+    }
+    if(iTimeLeft==1&&bTickOn)
+        document.getElementById(bInBreak?'wavDoneBreak':'wavDoneFight').play();
+}
+function doneFight() {
+    bIsFighting = false;
+    bPause = false;
+    bInBreak = false;
+    ChamDiem.BatDau.disabled = false;
+    document.getElementById('HaiManHinh').disabled = false;
+    document.getElementById('HaiTrongBa').disabled = false;
+    document.getElementById('DungSS').disabled = true;
+    document.getElementById('DungXX').disabled = true;
+    ChamDiem.XoaDiem.disabled = false;
+    ChamDiem.TranMoi.disabled = false;
+    ChamDiem.TGHiepDau.disabled = false;
+    ChamDiem.TGNghiGiuaHiep.disabled = false;
+    if(Number(ChamDiem.DiemD.value)>Number(ChamDiem.DiemX.value)) blinkScore('DiemDo', true);
+    if(Number(ChamDiem.DiemD.value)<Number(ChamDiem.DiemX.value)) blinkScore('DiemXanh', true);
+
+    logFightInfo('Kết thúc');
+    oTranDau.ghiThongTin();
+    /*var sInfo = 'Trận đấu: ' + ChamDiem.FightInfo.value + String.fromCharCode(13,10);
+    sInfo += 'Xanh: ' + ChamDiem.TenXanh.value;
+    sInfo += ', Điểm: ' + ChamDiem.DiemX.value;
+    sInfo += ', Trừ: ' + ChamDiem.TruX.value + String.fromCharCode(13,10);
+    sInfo += 'Đỏ: ' + ChamDiem.TenDo.value;
+    sInfo += ', Điểm: ' + ChamDiem.DiemD.value;
+    sInfo += ', Trừ: ' + ChamDiem.TruD.value + String.fromCharCode(13,10);
+    sInfo += 'Trọng tài 1: ' + String.fromCharCode(13,10);
+    sInfo += 'Trọng tài 2: ' + String.fromCharCode(13,10);
+    sInfo += 'Trọng tài 3: ' + String.fromCharCode(13,10);
+    sInfo += 'Trọng tài 4: ' + String.fromCharCode(13,10);
+    ChamDiem.FightInfo.value = sInfo + ChamDiem.FightInfo.value;*/
+}
+function newTimeLeft() {
+    iTimeLeft = ChamDiem.TGHiepDau.value;
+    bTickOn = true;
+    showTimeLeft();
+}
+function showTimeLeft() {
+    var oObj = oDisplay.document.getElementById('GioConLai');
+    var sSec = iTimeLeft % 60;
+    var sMin = (iTimeLeft-sSec) / 60;
+    sMin = (sMin<10?'0':'')+String(sMin);
+    sSec = (sSec<10?'0':'')+String(sSec);
+    oObj.innerHTML = sMin+(bTickOn?':':'<font color="#000000">:</font>')+sSec;
+    duplicateDisplay('GioConLai');
+    //alert(oObj.innerHTML);
+    /*
+    var sPrefix = 'img/r';
+    var sSurfix = 'med.gif';
+    document.getElementById('min1').src = sPrefix+sMin.substr(0, 1)+sSurfix;
+    document.getElementById('min2').src = sPrefix+sMin.substr(1, 1)+sSurfix;
+    document.getElementById('Tick').src = 'img/'+(bTickOn||!bIsFighting?'-':'_')+'fdr.gif';
+    document.getElementById('sec1').src = sPrefix+sSec.substr(0, 1)+sSurfix;
+    document.getElementById('sec2').src = sPrefix+sSec.substr(1, 1)+sSurfix;
+    */
+}
+function showPauseTime() {
+    var oObj = oDisplay.document.getElementById('HangCan');
+    var sSec = iPauseTime % 60;
+    var sMin = (iPauseTime-sSec) / 60;
+    sMin = (sMin<10?'0':'')+String(sMin);
+    sSec = (sSec<10?'0':'')+String(sSec);
+    oObj.innerHTML = sMin+(bPauseTick?':':'<font color="#000000">:</font>')+sSec;
+    duplicateDisplay('HangCan');
+    //alert(oObj.innerHTML);
+}
+function showScore() {
+    var sDiemX = ChamDiem.DiemX.value;
+    var sDiemD = ChamDiem.DiemD.value;
+    var iTruX = Number(ChamDiem.TruX.value);
+    var iTruD = Number(ChamDiem.TruD.value);
+    if(bIsFighting) {
+        var sInfo = 'At ' + iTimeLeft + ' tick ' + (bTickOn?'on':'off');
+        sInfo += ': X(' + sDiemX + '-' + iTruX;
+        sInfo += ', M=' + sMatchX1 + ', B=' + sMatchX2 + ', K=' + sMatchX3;
+        sInfo += ') D(' + sDiemD + '-' + iTruD;
+        sInfo += ', M=' + sMatchD1 + ', B=' + sMatchD2 + ', K=' + sMatchD3 + ')' + String.fromCharCode(13, 10);
+        //ChamDiem.FightInfo.value += sInfo;
+    }
+    //alert((sScore.length=0?0:(sScore.length=1?sScore:sScore.substr(1, 1))));
+    //alert(oDisplay.document.getElementById('DiemXanh'));
+    oDisplay.document.getElementById('DiemXanh').innerHTML = sDiemX;
+    if(oDisplay2) oDisplay2.document.getElementById('DiemXanh').innerHTML = sDiemX;
+    oDisplay.document.getElementById('DiemDo').innerHTML = sDiemD;
+    if(oDisplay2) oDisplay2.document.getElementById('DiemDo').innerHTML = sDiemD;
+    for(var i=1; i<=iMaxLoi; i++) {
+        //if(i==12) alert(i + '\n' + iMaxLoi);
+        showLoi('X', i, iTruX);
+        showLoi('D', i, iTruD);
+    }
+}
+function showLoi(sMau, i, iTru) {
+    if((i<=iTru || i<20) && (i % 10==1) && oDisplay.document.getElementById(sMau+'tru'+i) == null) {
+        var cellLoi = oDisplay.document.getElementById('tdLoi'+sMau);
+        for(var j=i; j<i+10; j += 2) {
+            // Each time new circle is needed, add batch of 5 to avoid mis-align.
+            cellLoi.innerHTML += '\n\t\t\t\t' + (j % 10==1?'<br />':'&nbsp;') + '\n\t\t\t\t' + '<img id="' + sMau + 'tru' + j + '" class="DiemTru">';
+            cellLoi.innerHTML += '<img id="' + sMau + 'tru' + (j + 1) + '" class="DiemTru">';
+        }
+        if(oDisplay2) oDisplay2.document.getElementById('tdLoi'+sMau).innerHTML = cellLoi.innerHTML;
+        //if(i==12)
+        //    alert(cellLoi.innerHTML+'\n'+i);
+    }
+    var imgLoi = oDisplay.document.getElementById(sMau+'tru'+i);
+    if(imgLoi != null) {
+        imgLoi.src = 'img/'+(i<=iTru?sMau+(i % 2==1?'NuaTrai':'NuaPhai'):sMau+'Dot')+'.gif';
+        //if(i==12) alert(imgLoi.src + '\n' + i + '\n' + iTru);
+        if(oDisplay2) oDisplay2.document.getElementById(sMau+'tru'+i).src = imgLoi.src;
+    }
+}
+function blinkScore(sID, bBlinking) {
+    var sDiem = document.getElementById((sID=='DiemXanh')?'DiemX':'DiemD').value;
+    oDisplay.document.getElementById(sID).innerHTML = bBlinking?sDiem.blink():sDiem;
+    duplicateDisplay(sID);
+}
+function clearScore(bXacNhan=false) {
+    if(ChamDiem.DiemX.value+ChamDiem.DiemD.value+ChamDiem.TruX.value+ChamDiem.TruD.value==0||
+        bXacNhan||confirm('Có thật sự muốn xóa điểm không?\n- Bấm OK là có\n- Bấm Cancel là không')==true) {
+        //clearMatch();
+        ChamDiem.DiemX.value = 0;
+        ChamDiem.DiemD.value = 0;
+        ChamDiem.TruX.value = 0;
+        ChamDiem.TruD.value = 0;
+        showScore();
+    }
+}
+function showList() {
+    var oList = document.getElementById('ChonTran');
+    for(;oList.length>0;oList.remove(0));
+    var sList = document.getElementById('DanhSachTran').value;
+    if(sList == "") {
+        sList = "1;gt;kg;VDV 1;VDV 2" + String.fromCharCode(10) +
+            "2;gt;kg;VDV 3;VDV 4";
+        document.getElementById('DanhSachTran').value = sList
+    } else {
+        // Không làm gì
+    }
+    var aList = sList.split(String.fromCharCode(10));
+    //alert(aList);
+    for(var i=0; i<aList.length; i++)
+        if(aList[i]!='') {
+            //alert(aList[i]);//oList.add(aList[i], null);
+            var y = document.createElement('option');
+            y.text = aList[i].split(String.fromCharCode(9));
+            y.value = i+1;
+            try { oList.add(y, null); }
+            catch(ex) { oList.add(y); }
+        }
+    if(aList.length>0) oList.selectedIndex=0;
+    showAllInfo();
+}
+function showAllInfo() {
+    var oList = document.getElementById('ChonTran');
+    if(oList.length>0) {
+        var aList = oList.options[oList.selectedIndex].text.split(',');
+        if(aList.length<4) aList = oList.options[oList.selectedIndex].text.split(';');
+         if(aList.length>=4) {
+            //alert(aList);
+            var i = (aList.length==5?1:0);
+            ChamDiem.GioiTinh.value = aList[i];
+            ChamDiem.HangCan.value = aList[i+1];
+            oTranDau = new TranDau(
+                    new VanDongVien('D', aList[i+2]),
+                    new VanDongVien('X', aList[i+3])
+                    );
+            ChamDiem.TenDo.value = oTranDau['D'].HoTen;
+            ChamDiem.TenXanh.value = oTranDau['X'].HoTen;
+        }
+    }
+    showInfo('TenDo');
+    showInfo('TenXanh');
+    showInfo('GioiTinh');
+    showInfo('HangCan');
+    showInfo('TranSo');
+    clearScore();
+    newTimeLeft();
+}
+function showRound(iRound) {
+    oDisplay.document.getElementById('HiepSo').innerHTML = iRound;
+    if(oDisplay2) oDisplay2.document.getElementById('HiepSo').innerHTML = oDisplay.document.getElementById('HiepSo').innerHTML
+}
+function showHide(sID, oFocusTo) {
+    var oObj = oDisplay.document.getElementById(sID);
+    oObj.style.display = oObj.style.display=='none'?'block':'none';
+    if(oDisplay2 && oDisplay2.document.getElementById(sID)) oDisplay2.document.getElementById(sID).display = oObj.style.display;
+    if(oFocusTo&&oObj.style.display!='none') oFocusTo.focus();
+}
+function showInfo(sID) {
+    if(!oDisplay.document.getElementById(sID)) alert('DIV named '+sID+' not found! Please add it.');
+    else if(!ChamDiem.elements[sID]) alert('INPUT TEXT named '+sID+' not found! Please add it.');
+    else {
+        oDisplay.document.getElementById(sID).innerHTML = ChamDiem.elements[sID].value!=''?ChamDiem.elements[sID].value:'&nbsp;';
+        if(oDisplay2) oDisplay2.document.getElementById(sID).innerHTML = oDisplay.document.getElementById(sID).innerHTML
+    }
+}
+function duplicateDisplay(sID) {
+    if(oDisplay2) oDisplay2.document.getElementById(sID).innerHTML = oDisplay.document.getElementById(sID).innerHTML;
+}
+function showDisplayWindow() {
+    var sHtml = '<!DOCTYPE html>';
+    sHtml += '<html><head>';
+    sHtml += '<meta http-equiv="Content-Type" content="text/html; CHARSET=UTF-8" />';
+    sHtml += getTag('page_title') + getTag('page_style');
+    sHtml += '</head><body><div id="Display" style="display: block;"></div>';
+    sHtml += getTag('page_footer');
+    sHtml += '</body></html>';
+    if(document.getElementById('HaiManHinh').checked) {
+        //var oMainWin=window;
+        oDisplay2 = window.open('about:blank','_blank','location=no;menubar=no;status=no;toolbar=no');
+        //oMainWin.focus();
+        alert('Tam dung de mo cua so hien thi. Vui long nhan OK khi cua so da hien ra xong.\nDe he thong hoat dong dung, cua so chinh phai luon duoc chon.');
+        oDisplay2.document.write(sHtml);
+        oDisplay2.document.getElementById('Display').innerHTML = oDisplay.document.getElementById('Display').innerHTML
+        //document.getElementById('Display').display = 'none';
+    } else {
+        //if(oDisplay&&oDisplay!=window) oDisplay.close();
+        if(oDisplay2) oDisplay2.close();
+        //oDisplay = window;
+        //document.getElementById('Display').display = 'block';
+        //alert(document.getElementById('Display').display);
+    }
+    showTimeLeft();
+    showScore();
+}
+function getTag(idTag) {
+    element = window.document.getElementById(idTag);
+    return element.outerHTML;
+}
+function onLoad() {
+    for(i=1; i<=11; i++)
+        ChamDiem.elements[aCtrl[i]].value = aDefKeys[i+24-1];
+    ChamDiem.PhimX1.value = aDefKeys[0];
+    ChamDiem.PhimX5.value = aDefKeys[1];
+    ChamDiem.PhimX9.value = aDefKeys[2];
+    ChamDiem.PhimD1.value = aDefKeys[3];
+    ChamDiem.PhimD5.value = aDefKeys[4];
+    ChamDiem.PhimD9.value = aDefKeys[5];
+    ChamDiem.PhimX2.value = aDefKeys[6];
+    ChamDiem.PhimX6.value = aDefKeys[7];
+    ChamDiem.PhimX10.value = aDefKeys[8];
+    ChamDiem.PhimD2.value = aDefKeys[9];
+    ChamDiem.PhimD6.value = aDefKeys[10];
+    ChamDiem.PhimD10.value = aDefKeys[11];
+    ChamDiem.PhimX3.value = aDefKeys[12];
+    ChamDiem.PhimX7.value = aDefKeys[13];
+    ChamDiem.PhimX11.value = aDefKeys[14];
+    ChamDiem.PhimD3.value = aDefKeys[15];
+    ChamDiem.PhimD7.value = aDefKeys[16];
+    ChamDiem.PhimD11.value = aDefKeys[17];
+    ChamDiem.PhimX4.value = aDefKeys[18];
+    ChamDiem.PhimX8.value = aDefKeys[19];
+    ChamDiem.PhimX12.value = aDefKeys[20];
+    ChamDiem.PhimD4.value = aDefKeys[21];
+    ChamDiem.PhimD8.value = aDefKeys[22];
+    ChamDiem.PhimD12.value = aDefKeys[23];
+    oDisplay = window;
+    showDisplayWindow();
+    clearScore();
+    showList();
+}
+function onUnload() {
+    /*if(bIsFighting) {
+        bPause = true;
+        if(confirm('Có thật sự muốn ngưng trận đấu không?\n- Bấm OK là có\n- Bấm Cancel là không')==true) {
+    */        //clearInterval(t1);
+            clearInterval(t2);
+            doneFight();
+            //if(document.getElementById('HaiManHinh').checked) oDisplay.close();
+            if(oDisplay2) oDisplay2.close();
+            //alert(oDisplay.closed);
+    /*        return true;
+        } else return bPause = false;
+    }*/
+}
+  </script>
+</head>
+<body onkeydown="onKey(event, 'down');" onkeyup="onKey(event, 'up');" onload="onLoad();" onunload="onUnload();">
+<div id="Display" style="display: block;">
+  <table width="100%" border="0" cellpadding="0" cellspacing="0">
+    <tr align="center" valign="top">
+      <td colspan="2">
+        <span id="TranSo" class="Hiep">1</span>
+      </td>
+      <td colspan="2">
+        <span id="GioConLai" class="Hiep">&nbsp;</span>
+      </td>
+      <td colspan="2">
+        <span id="HiepSo" class="Hiep">1</span>
+      </td>
+    </tr>
+    <tr align="center" valign="top">
+      <td width="10%" class="Do">
+        1<img id="Dm1" src="img/DDot.gif" class="MatBung"><br />
+        2<img id="Dm2" src="img/DDot.gif" class="MatBung"><br />
+        3<img id="Dm3" src="img/DDot.gif" class="MatBung"><br />
+        4<img id="Dm4" src="img/DDot.gif" class="MatBung"><br />
+        1<img id="Dk1" src="img/DDot.gif" class="MatBung"><br />
+        2<img id="Dk2" src="img/DDot.gif" class="MatBung"><br />
+        3<img id="Dk3" src="img/DDot.gif" class="MatBung"><br />
+        4<img id="Dk4" src="img/DDot.gif" class="MatBung"><br />
+        1<img id="Db1" src="img/DDot.gif" class="MatBung"><br />
+        2<img id="Db2" src="img/DDot.gif" class="MatBung"><br />
+        3<img id="Db3" src="img/DDot.gif" class="MatBung"><br />
+        4<img id="Db4" src="img/DDot.gif" class="MatBung"><br />
+      </td>
+      <td id="tdLoiD" width="40%" class="Do" colspan="2">
+        <span id="DiemDo" class="Diem">0</span>
+      </td>
+      <td id="tdLoiX" width="40%" class="Xanh" colspan="2">
+        <span id="DiemXanh" class="Diem">0</span>
+      </td>
+      <td width="10%" class="Xanh">
+        <img id="Xm1" src="img/XDot.gif" class="MatBung">1<br />
+        <img id="Xm2" src="img/XDot.gif" class="MatBung">2<br />
+        <img id="Xm3" src="img/XDot.gif" class="MatBung">3<br />
+        <img id="Xm4" src="img/XDot.gif" class="MatBung">4<br />
+        <img id="Xk1" src="img/XDot.gif" class="MatBung">1<br />
+        <img id="Xk2" src="img/XDot.gif" class="MatBung">2<br />
+        <img id="Xk3" src="img/XDot.gif" class="MatBung">3<br />
+        <img id="Xk4" src="img/XDot.gif" class="MatBung">4<br />
+        <img id="Xb1" src="img/XDot.gif" class="MatBung">1<br />
+        <img id="Xb2" src="img/XDot.gif" class="MatBung">2<br />
+        <img id="Xb3" src="img/XDot.gif" class="MatBung">3<br />
+        <img id="Xb4" src="img/XDot.gif" class="MatBung">4<br />
+      </td>
+    </tr>
+    <tr align="center" valign="top">
+      <td class="Do" colspan="2" width="30%">
+        <span id="TenDo" class="Ten">ABCDE</span>
+      </td>
+      <td width="20%">
+        <span id="GioiTinh" class="Ten">NAM</span>
+      </td>
+      <td width="20%">
+        <span id="HangCan" class="Ten">65kg</span>
+      </td>
+      <td class="Xanh" colspan="2" width="30%">
+        <span id="TenXanh" class="Ten">FGHIJ</span>
+      </td>
+    </tr>
+    <tr>
+      <td width="10%">
+      </td>
+      <td width="20%">
+      </td>
+      <td width="20%">
+      </td>
+      <td width="20%">
+      </td>
+      <td width="20%">
+      </td>
+      <td width="10%">
+      </td>
+    </tr>
+  </table>
+</div>
+<br />
+<br />
+<br />
+<br />
+  <form name="ChamDiem" id="ChamDiem" action="#" method="post">
+    <table border="2">
+      <tr>
+        <td></td>
+        <td>
+          Trận: <select name="TranSo" id="ChonTran" width="60" onchange="showAllInfo();"></select><br />
+          Giới tính: <input type="text" name="GioiTinh" size="6" onchange="showInfo('GioiTinh');" /><br />
+          Hạng cân: <input type="text" name="HangCan" size="6" onchange="showInfo('HangCan');" />
+        </td>
+        <td>
+					<input type="checkbox" name="HaiManHinh" id="HaiManHinh" checked="true" onclick="showDisplayWindow();" /><label for="HaiManHinh"> Dùng hai màn hình</label><br />
+          <input type="button" class="BigButton" name="BatDau" id="BatDau" value="Bắt đầu" onclick="startFight();" /><br /><br />
+          <input type="button" class="BigButton" name="KetThuc" id="KetThuc" value="Kết thúc" onclick="doneFight();" />
+        </td>
+        <td valign="bottom">
+					<input type="checkbox" name="HaiTrongBa" id="HaiTrongBa" checked="true" /><label for="HaiTrongBa"> 2 trong 3 trọng tài</label><br />
+          <input type="button" class="BigButton" name="DungSS" id="DungSS" value="Dừng săn sóc / Tiếp tục" onclick="setPause('ss');" disabled /><br /><br />
+          <input type="button" class="BigButton" name="DungXX" id="DungXX" value="Dừng xem xét / Tiếp tục" onclick="setPause('xx');" disabled />
+        </td>
+        <td>
+        </td>
+        <td>
+        Đặt lại hiệp <select name="DatLaiHiep" id="DatLaiHiep" width="30">
+          <option>1</option>
+          <option>2</option>
+          <option>3</option>
+          <option>4</option>
+        </select>
+        phút <select name="DatLaiPhut" id="DatLaiPhut" width="30">
+          <option>0</option>
+          <option>1</option>
+          <option>2</option>
+          <option>3</option>
+          <option>4</option>
+          <option>5</option>
+          <option>6</option>
+          <option>7</option>
+          <option>8</option>
+          <option>9</option>
+          <option>10</option>
+        </select>
+        giây <select name="DatLaiGiay" id="DatLaiGiay" width="30">
+          <option>00</option>
+          <option>01</option>
+          <option>02</option>
+          <option>03</option>
+          <option>04</option>
+          <option>05</option>
+          <option>06</option>
+          <option>07</option>
+          <option>08</option>
+          <option>09</option>
+          <option>10</option>
+          <option>11</option>
+          <option>12</option>
+          <option>13</option>
+          <option>14</option>
+          <option>15</option>
+          <option>16</option>
+          <option>17</option>
+          <option>18</option>
+          <option>19</option>
+          <option>20</option>
+          <option>21</option>
+          <option>22</option>
+          <option>23</option>
+          <option>24</option>
+          <option>25</option>
+          <option>26</option>
+          <option>27</option>
+          <option>28</option>
+          <option>29</option>
+          <option>30</option>
+          <option>31</option>
+          <option>32</option>
+          <option>33</option>
+          <option>34</option>
+          <option>35</option>
+          <option>36</option>
+          <option>37</option>
+          <option>38</option>
+          <option>39</option>
+          <option>40</option>
+          <option>41</option>
+          <option>42</option>
+          <option>43</option>
+          <option>44</option>
+          <option>45</option>
+          <option>46</option>
+          <option>47</option>
+          <option>48</option>
+          <option>49</option>
+          <option>50</option>
+          <option>51</option>
+          <option>52</option>
+          <option>53</option>
+          <option>54</option>
+          <option>55</option>
+          <option>56</option>
+          <option>57</option>
+          <option>58</option>
+          <option>59</option>
+        </select><br />
+        <input type="button" class="SmallButton" name="BatDauLai" id="BatDauLai" value="Bắt đầu lại" onclick="restartFight();" /><br />
+        Điểm dừng hiệp 4: <select name="DiemDungHiep4" id="DiemDungHiep4" width="30">
+          <option>1</option>
+          <option>2</option>
+          <option>3</option>
+          <option>4</option>
+          <option>5</option>
+        </select>
+        </td>
+      </tr>
+      <tr>
+        <td></td>
+        <th>Tên</th>
+        <th>Điểm</th>
+        <th>Lỗi</th>
+        <th></th>
+        <th>Thời gian</th>
+      </tr>
+      <tr>
+        <th><span class="Do">Đỏ</div></th>
+        <td><input type="text" name="TenDo" class="Do" size="10" onchange="showInfo('TenDo');" /></td>
+        <td><input type="text" name="DiemD" id="DiemD" class="Do" size="5" value="0" onfocus="onFocus(this);" onchange="showScore();" />
+          <input type="button" name="CongDiemD" id="CongDiemD" value="+" onclick="oTranDau['D'].dieuChinh(1);" />
+          <input type="button" name="TruDiemD" id="TruDiemD" value="--" onclick="oTranDau['D'].dieuChinh(-1);" />&nbsp;&nbsp;&nbsp;
+        </td>
+        <td><input type="text" name="TruD" class="Do" size="5" value="0" onfocus="onFocus(this);" onchange="showScore();" />
+          <input type="button" name="CongLoiD" id="CongLoiD" value="+" onclick="oTranDau.tangLoi('D', false);" />
+          <input type="button" name="TruLoiD" id="TruLoiD" value="--" onclick="oTranDau.tangLoi('D', true);" />
+        </td>
+        <td rowspan="2">
+          <input type="button" name="XoaDiem" value="Xóa điểm" onclick="clearScore();" /> <br />
+          <input type="button" name="TinhTatCaHiep" value="Tính Tất cả Hiệp" onclick="oTranDau.tinhTatCaHiep();" /> <br />
+          <input type="button" name="TranMoi" value="Trận mới" onclick="showAllInfo();" />
+        </td>
+        <td>Một hiệp: <select name="TGHiepDau" onfocus="onFocus(this);">
+          <!--option value="20">1/3 phút</option-->
+          <option value="15">Thử 15 giây</option>
+          <option value="45">45 giây</option>
+          <option value="60">1 phút</option>
+          <option value="90">1 phút 30 giây</option>
+          <option value="120" selected="selected">2 phút</option>
+          <option value="150">2 phút 30 giây</option>
+          <option value="180">3 phút</option>
+          <option value="240">4 phút</option>
+          <option value="300">5 phút</option>
+          <option value="360">6 phút</option>
+          <option value="420">7 phút</option>
+          <option value="480">8 phút</option>
+          <option value="540">9 phút</option>
+          <option value="600">10 phút</option>
+          </select>
+          &nbsp;&nbsp;TG Khớp phím<select name="TGKhopPhim" onfocus="onFocus(this);">
+            <option value="1000">1.0 giây</option>
+            <option value="1500">1.5 giây</option>
+            <option value="2000" selected>2.0 giây</option>
+          </select>
+        </td>
+      </tr>
+      <tr>
+        <th><span class="Xanh">Xanh</div></th>
+        <td><input type="text" name="TenXanh" class="Xanh" size="10" onchange="showInfo('TenXanh');" /></td>
+        <td><input type="text" name="DiemX" id="DiemX" class="Xanh" size="5" value="0" onfocus="onFocus(this);" onchange="showScore();" />
+          <input type="button" name="CongDiemX" id="CongDiemX" value="+" onclick="oTranDau['X'].dieuChinh(1);" />
+          <input type="button" name="TruDiemX" id="TruDiemX" value="--" onclick="oTranDau['X'].dieuChinh(-1);" />&nbsp;&nbsp;&nbsp;
+        </td>
+        <td><input type="text" name="TruX" class="Xanh" size="5" value="0" onfocus="onFocus(this);" onchange="showScore();" />
+          <input type="button" name="CongLoiX" id="CongLoiX" value="+" onclick="oTranDau.tangLoi('X', false);" />
+          <input type="button" name="TruLoiX" id="TruLoiX" value="--" onclick="oTranDau.tangLoi('X', true);" />
+        </td>
+        <td>Nghỉ giữa hiệp: <select name="TGNghiGiuaHiep" onfocus="onFocus(this);">
+          <!--option value="20">1/3 phút</option-->
+          <option value="15">Thử 15 giây</option>
+          <option value="30">30 giây</option>
+          <option value="45">45 giây</option>
+          <option value="60" selected="selected">1 phút</option>
+          <option value="90">1 phút 30 giây</option></select>
+        </td>
+      </tr>
+      <tr>
+        <td colspan="3">
+          Các trận đấu<br />
+          STT;Giới tính;Hạng cân;Tên đỏ;Tên xanh<br />
+          <textarea name="DanhSachTran" id="DanhSachTran" cols="60" rows="20" onchange="showList();" onfocus="onFocus(this);"></textarea><br />
+        </td>
+        <td colspan="3" valign="top">
+          Thông tin các hiệp đấu
+          <table id="BangTTTranDau" border="1">
+            <tr>
+              <th>Hiệp</th>
+              <th><span class="Do">Điểm Đỏ</th>
+              <th><span class="Do">Đấm</th>
+              <th><span class="Do">Thắng hiệp</th>
+              <th><span class="Do">Lỗi</th>
+              <th><span class="Xanh">Điểm Xanh</th>
+              <th><span class="Xanh">Đấm</th>
+              <th><span class="Xanh">Thắng hiệp</th>
+              <th><span class="Xanh">Lỗi</th>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>0</td>
+              <td>0</td>
+              <td>0</td>
+              <td>0</td>
+              <td>0</td>
+              <td>0</td>
+              <td>0</td>
+              <td>0</td>
+          </table>
+        </td>
+      </tr>
+      <tr>
+        <td colspan="6">
+          <a href="#" onclick="showHide('divFightInfo');return false;">Thông tin trận đấu</a><br />
+          <div id="divFightInfo" style="display: none;">
+          <textarea id="FightInfo" name="FightInfo" cols="120" rows="20" onfocus="onFocus(this);"></textarea><br />
+          </div>
+          <!--<textarea id="Debug" cols="200" rows="10" onfocus="onFocus(this);"> </textarea>-->
+        </td>
+      </tr>
+    </table>
+    <a href="#" onclick="showHide('VungXacLapPhim', ChamDiem.PhimX1);return false;">Đổi mã phím</a>
+    <!--
+    http://www.w3schools.com/html/html5_audio.asp
+    http://www.w3schools.com/jsref/dom_obj_audio.asp
+    -->
+    <audio id="wavCountDown" controls style="display: hidden;">
+      <source src="file://C:/Windows/Media/chord.wav" type="audio/wav">
+      Your browser does not support the audio element.
+    </audio>
+    <audio id="wavDoneFight" controls style="display: hidden;">
+      <source src="file://C:/Windows/Media/tada.wav" type="audio/wav">
+      Your browser does not support the audio element.
+    </audio>
+    <audio id="wavDoneBreak" controls style="display: hidden;">
+      <source src="file://C:/Windows/Media/notify.wav" type="audio/wav">
+      Your browser does not support the audio element.
+    </audio>
+  <div id="VungXacLapPhim" style="display: none;">
+    <table summary="" border="1">
+      <tr>
+        <th></th>
+        <th colspan="3"><div class="Xanh">Xanh</div></th>
+        <th></th>
+        <th colspan="3"><div class="Do">Đỏ</div></th>
+        <th colspan="2">Điều khiển</th>
+      </tr>
+      <tr>
+        <th></th>
+        <th><div class="Xanh">Mặt</div></th>
+        <th><div class="Xanh">Bụng</div></th>
+        <th><div class="Xanh">Khó</div></th>
+        <th></th>
+        <th><div class="Do">Mặt</div></th>
+        <th><div class="Do">Bụng</div></th>
+        <th><div class="Do">Khó</div></th>
+        <td rowspan="2">Bắt đầu / Tiếp tục<br />
+          Dừng săn sóc<br />
+          Dừng xem xét
+        </td>
+        <td rowspan="2"><input type="text" name="PhimBatDau" onfocus="onFocus(this);" size="5" /><br />
+          <input type="text" name="PhimDungSS" onfocus="onFocus(this);" size="5" /><br />
+          <input type="text" name="PhimDungXX" onfocus="onFocus(this);" size="5" />
+        </td>
+      </tr>
+      <tr>
+        <td>Trọng tài 1</td>
+        <td><input type="text" name="PhimX1" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimX5" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimX9" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td>Trọng tài 1</td>
+        <td><input type="text" name="PhimD1" class="Do" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimD5" class="Do" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimD9" class="Do" onfocus="onFocus(this);" size="5" /></td>
+      </tr>
+      <tr>
+        <td>Trọng tài 2</td>
+        <td><input type="text" name="PhimX2" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimX6" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimX10" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td>Trọng tài 2</td>
+        <td><input type="text" name="PhimD2" class="Do" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimD6" class="Do" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimD10" class="Do" onfocus="onFocus(this);" size="5" /></td>
+        <td colspan="2" rowspan="4" valign="bottom">
+          <textarea name="aDefKeys" cols="20" rows="5" onfocus="onFocus(this);"></textarea>
+        </td>
+      </tr>
+      <tr>
+        <td>Trọng tài 3</td>
+        <td><input type="text" name="PhimX3" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimX7" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimX11" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td>Trọng tài 3</td>
+        <td><input type="text" name="PhimD3" class="Do" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimD7" class="Do" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimD11" class="Do" onfocus="onFocus(this);" size="5" /></td>
+      </tr>
+      <tr>
+        <td>Trọng tài 4</td>
+        <td><input type="text" name="PhimX4" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimX8" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimX12" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td>Trọng tài 4</td>
+        <td><input type="text" name="PhimD4" class="Do" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimD8" class="Do" onfocus="onFocus(this);" size="5" /></td>
+        <td><input type="text" name="PhimD12" class="Do" onfocus="onFocus(this);" size="5" /></td>
+      </tr>
+      <tr>
+        <td>Phạm lỗi</td>
+        <td><input type="text" name="PhimXTru" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td>Hủy lỗi</td>
+        <td><input type="text" name="PhimXCong" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td>Phạm lỗi</td>
+        <td><input type="text" name="PhimDTru" class="Do" onfocus="onFocus(this);" size="5" /></td>
+        <td>Hủy lỗi</td>
+        <td><input type="text" name="PhimDCong" class="Do" onfocus="onFocus(this);" size="5" /></td>
+      </tr>
+      <tr>
+        <td>Cộng điểm</td>
+        <td><input type="text" name="PhimXTruDiem" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td>Trừ điểm</td>
+        <td><input type="text" name="PhimXCongDiem" class="Xanh" onfocus="onFocus(this);" size="5" /></td>
+        <td>Cộng điểm</td>
+        <td><input type="text" name="PhimDTruDiem" class="Do" onfocus="onFocus(this);" size="5" /></td>
+        <td>Trừ điểm</td>
+        <td><input type="text" name="PhimDCongDiem" class="Do" onfocus="onFocus(this);" size="5" /></td>
+      </tr>
+    </table>
+  </div>
+  </form>
+	<center id="page_footer"><a href="LICENSE">Copyright (C) 2019 Hải Lăng</a> <a href="README.md">README</a></center>
+</body>
+</html>
